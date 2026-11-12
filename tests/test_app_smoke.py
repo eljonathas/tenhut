@@ -8,6 +8,7 @@ from tenhut.application import Application
 from tenhut.application_options import ApplicationOptions
 from tenhut.controllers import PageId
 from tenhut.core import HeadPose, Phase, Theme
+from tenhut.i18n import t
 
 
 @pytest.fixture
@@ -80,9 +81,10 @@ def test_desertion_offers_resume_or_new_mission(app):
     controllers.mission.toggle_task(0)
     session.end_mission(False)
     controllers.navigator.open(PageId.MAIN)
+    resume_label = t("button.resume")
     labels = [button.label for button in controllers.navigator.current.buttons]
-    assert "CONTINUAR" in labels
-    next(button for button in controllers.navigator.current.buttons if button.label == "CONTINUAR").action()
+    assert resume_label in labels
+    next(button for button in controllers.navigator.current.buttons if button.label == resume_label).action()
     assert session.phase is Phase.WORK and session.tasks[0].done
 
 

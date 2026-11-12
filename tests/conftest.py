@@ -11,6 +11,10 @@ from pathlib import Path
 _TMP = Path(tempfile.mkdtemp(prefix="tenhut-tests-"))
 for _var, _sub in (("XDG_CONFIG_HOME", "config"), ("XDG_STATE_HOME", "state"), ("XDG_DATA_HOME", "data")):
     os.environ[_var] = str(_TMP / _sub)
+# Pin the locale so "auto" resolves to the same language on every machine and CI runner.
+for _var in ("LC_ALL", "LC_MESSAGES", "LANGUAGE"):
+    os.environ.pop(_var, None)
+os.environ["LANG"] = "pt_BR.UTF-8"
 os.environ["SDL_VIDEODRIVER"] = "dummy"
 os.environ["SDL_AUDIODRIVER"] = "dummy"
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")

@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -53,6 +54,10 @@ def settings(**judge):
 
 
 def make_executable(folder, name):
+    """A fake CLI that `shutil.which` can find: Windows only looks at PATHEXT extensions."""
+    if sys.platform == "win32":
+        (folder / f"{name}.cmd").write_text("@echo off\r\n")
+        return
     path = folder / name
     path.write_text("#!/bin/sh\n")
     path.chmod(0o755)
