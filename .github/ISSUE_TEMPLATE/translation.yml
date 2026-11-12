@@ -1,0 +1,17 @@
+name: New language
+description: Offer or request a translation
+labels: [translation]
+body:
+  - type: input
+    id: lang
+    attributes:
+      label: Language
+      placeholder: Español (es)
+    validations: { required: true }
+  - type: checkboxes
+    id: who
+    attributes:
+      label: Who will translate?
+      options:
+        - label: I can open the pull request (see docs/TRANSLATING.md)
+        - label: I would like someone else to do it

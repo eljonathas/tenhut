@@ -1,0 +1,118 @@
+name: Release
+
+# Pushing a tag like v0.2.0 builds the apps on all three systems and publishes a GitHub Release.
+# Run it by hand (Actions → Release → Run workflow) to just build and download the artifacts.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (${{ matrix.name }}, ${{ matrix.flavor }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, name: linux-x86_64, flavor: core }
+          - { os: ubuntu-latest, name: linux-x86_64, flavor: camera }
+          - { os: windows-latest, name: windows-x86_64, flavor: core }
+          - { os: windows-latest, name: windows-x86_64, flavor: camera }
+          - { os: macos-latest, name: macos-arm64, flavor: core }
+          - { os: macos-latest, name: macos-arm64, flavor: camera }
+    # the camera builds bundle mediapipe + OpenCV and are the fragile ones: a failure there must not block the rest
+    continue-on-error: ${{ matrix.flavor == 'camera' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then v="${GITHUB_REF_NAME#v}"; else v="0.0.0-dev"; fi
+          echo "TENHUT_VERSION=${v%%-*}" >> "$GITHUB_ENV"
+          echo "ASSET=tenhut-${v}-${{ matrix.name }}${{ matrix.flavor == 'camera' && '-camera' || '' }}" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          if [[ "${{ matrix.flavor }}" == "camera" ]]; then uv sync --group build --extra camera; else uv sync --group build; fi
+
+      - name: Tests
+        run: uv sync --group dev --group build ${{ matrix.flavor == 'camera' && '--extra camera' || '' }} && uv run pytest -q
+
+      - name: Build
+        shell: bash
+        env:
+          TENHUT_FLAVOR: ${{ matrix.flavor }}
+        run: uv run pyinstaller packaging/tenhut.spec --noconfirm
+
+      - name: Smoke test (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          SDL_VIDEODRIVER: dummy
+          SDL_AUDIODRIVER: dummy
+        run: |
+          export XDG_CONFIG_HOME="$RUNNER_TEMP/c" XDG_STATE_HOME="$RUNNER_TEMP/s" XDG_DATA_HOME="$RUNNER_TEMP/d"
+          timeout 8 dist/tenhut/tenhut --dry-run || code=$?
+          test "${code:-0}" = 124   # still running after 8 s = started fine
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p out && cp -r dist/tenhut "out/$ASSET" && cp LICENSE README.md "out/$ASSET/"
+          tar -C out -czf "$ASSET.tar.gz" "$ASSET"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory out | Out-Null
+          Copy-Item dist\tenhut "out\$env:ASSET" -Recurse
+          Copy-Item LICENSE, README.md "out\$env:ASSET"
+          Compress-Archive -Path "out\$env:ASSET" -DestinationPath "$env:ASSET.zip"
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p out && cp -R dist/Tenhut.app out/ && cp LICENSE out/
+          hdiutil create -volname "Tenhut" -srcfolder out -ov -format UDZO "$ASSET.dmg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ASSET }}
+          path: |
+            ${{ env.ASSET }}.tar.gz
+            ${{ env.ASSET }}.zip
+            ${{ env.ASSET }}.dmg
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Checksums
+        run: cd assets && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" assets/* \
+            --repo "$GITHUB_REPOSITORY" --title "Tenhut $GITHUB_REF_NAME" --generate-notes

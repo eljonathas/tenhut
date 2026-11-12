@@ -1,0 +1,36 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Linux, Windows, macOS]
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes:
+      label: Tenhut version
+      description: From the release name, or `git describe` if you run from source
+    validations: { required: true }
+  - type: dropdown
+    id: install
+    attributes:
+      label: How do you run it?
+      options: [Release download (no camera), Release download (with camera), From source]
+    validations: { required: true }
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations: { required: true }
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output / screenshots
+      description: Run it from a terminal if you can. Do not paste private data from your config.
