@@ -1,0 +1,149 @@
+#!/usr/bin/python3 -I
+"""Tenhut — helper privilegiado.
+
+Único trecho que roda com privilégio (Linux/macOS: root via regra NOPASSWD em
+/etc/sudoers.d/tenhut; Windows: o próprio app, como administrador, carrega este arquivo).
+Faz uma coisa só: reescreve o bloco delimitado do General no arquivo hosts.
+
+Arquivo autônomo: NÃO importa o pacote tenhut e NÃO aceita caminho vindo de variável de ambiente.
+
+  hosts-helper apply   < lista de domínios (um por linha) no stdin
+  hosts-helper clear
+  hosts-helper status
+"""
+
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+
+def hosts_path(platform: str = sys.platform) -> str:
+    if platform.startswith("win"):
+        root = os.environ.get("SystemRoot") or os.environ.get("windir") or r"C:\Windows"
+        return os.path.join(root, "System32", "drivers", "etc", "hosts")
+    return "/etc/hosts"
+
+
+HOSTS = hosts_path()
+BEGIN = "# >>> tenhut >>>"
+END = "# <<< tenhut <<<"
+# marcadores da versão antiga: removidos junto, para não sobrar bloco órfão no /etc/hosts
+BEGINS = {BEGIN, "# >>> general-foco >>>"}
+ENDS = {END, "# <<< general-foco <<<"}
+DOMAIN_RE = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
+MAX_DOMAINS = 5000
+
+
+def strip_block(text: str) -> str:
+    out, inside = [], False
+    for line in text.splitlines():
+        if line.strip() in BEGINS:
+            inside = True
+            continue
+        if line.strip() in ENDS:
+            inside = False
+            continue
+        if not inside:
+            out.append(line)
+    while out and not out[-1].strip():
+        out.pop()
+    return "\n".join(out) + "\n"
+
+
+def flush_dns(platform: str = sys.platform) -> None:
+    """Esvazia o cache de DNS do sistema (melhor esforço; nunca levanta exceção)."""
+    if platform.startswith("win"):
+        cmds = [["ipconfig", "/flushdns"]]
+    elif platform == "darwin":
+        cmds = [["dscacheutil", "-flushcache"], ["killall", "-HUP", "mDNSResponder"]]
+    else:
+        cmds = [["resolvectl", "flush-caches"]]
+    extra = {"creationflags": 0x08000000} if platform.startswith("win") else {}
+    for cmd in cmds:
+        exe = shutil.which(cmd[0])
+        if not exe:
+            continue
+        try:
+            subprocess.run([exe, *cmd[1:]], check=False, timeout=10, stdin=subprocess.DEVNULL,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **extra)
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+
+def validate_domains(lines: list[str]) -> list[str]:
+    """Normaliza e valida (rígido) a lista de domínios; ValueError se algo não for um domínio."""
+    domains: list[str] = []
+    seen = set()
+    for raw in lines:
+        d = raw.strip().lower().rstrip(".")
+        if not d:
+            continue
+        if not DOMAIN_RE.match(d):
+            raise ValueError(f"dominio invalido: {d!r}")
+        if d not in seen:
+            seen.add(d)
+            domains.append(d)
+    if len(domains) > MAX_DOMAINS:
+        raise ValueError("dominios demais")
+    return domains
+
+
+def write_hosts(domains: list[str]) -> None:
+    path = os.path.realpath(HOSTS)
+    # surrogateescape: bytes que não sejam UTF-8 (comentários antigos) voltam como estavam
+    with open(path, encoding="utf-8", errors="surrogateescape") as f:
+        base = strip_block(f.read())
+    if domains:
+        lines = [BEGIN]
+        for d in domains:
+            lines.append(f"0.0.0.0 {d}")
+            lines.append(f":: {d}")
+        lines.append(END)
+        base += "\n" + "\n".join(lines) + "\n"
+    if os.name == "nt":
+        # Windows: escrita direta (substituir o arquivo perderia as permissões do original)
+        with open(path, "w", encoding="utf-8", errors="surrogateescape") as f:
+            f.write(base)
+    else:
+        tmp = path + ".tenhut.tmp"
+        with open(tmp, "w", encoding="utf-8", errors="surrogateescape") as f:
+            f.write(base)
+        os.chmod(tmp, 0o644)
+        os.chown(tmp, 0, 0)
+        os.replace(tmp, path)
+    flush_dns()
+
+
+def main() -> int:
+    cmd = sys.argv[1] if len(sys.argv) > 1 else ""
+    if cmd == "status":
+        with open(HOSTS, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+        inside = False
+        for line in text.splitlines():
+            if line.strip() in BEGINS:
+                inside = True
+            elif line.strip() in ENDS:
+                inside = False
+            elif inside and line.startswith("0.0.0.0 "):
+                print(line.split()[1])
+        return 0
+    if cmd == "clear":
+        write_hosts([])
+        return 0
+    if cmd == "apply":
+        try:
+            domains = validate_domains(sys.stdin.read().splitlines())
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return 2
+        write_hosts(domains)
+        return 0
+    print(__doc__, file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
