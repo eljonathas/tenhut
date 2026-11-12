@@ -88,7 +88,7 @@ jobs:
           mkdir -p out && cp -R dist/Tenhut.app out/ && cp LICENSE out/
           hdiutil create -volname "Tenhut" -srcfolder out -ov -format UDZO "$ASSET.dmg"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ env.ASSET }}
           path: |
