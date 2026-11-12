@@ -1,6 +1,6 @@
 [project]
 name = "tenhut"
-version = "0.1.0"
+version = "1.0.0"
 description = "Aggressive pomodoro: a pixel-art general blocks distractions until your mission is done"
 readme = "README.md"
 license = "MIT"
